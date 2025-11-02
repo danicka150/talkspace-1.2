@@ -179,6 +179,8 @@
             const password = document.getElementById('passwordInput').value;
             if (username && password) {
                 socket.emit('register', { username, password });
+            } else {
+                showError('Заполните все поля');
             }
         }
 
@@ -187,6 +189,8 @@
             const password = document.getElementById('passwordInput').value;
             if (username && password) {
                 socket.emit('login', { username, password });
+            } else {
+                showError('Заполните все поля');
             }
         }
 
@@ -195,16 +199,18 @@
             document.getElementById('authScreen').style.display = 'flex';
             document.getElementById('appScreen').style.display = 'none';
         }
-
-        function openTab(tabName) {
+function openTab(tabName) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             event.target.classList.add('active');
             document.getElementById(tabName + 'Tab').classList.add('active');
         }
-function searchUsers() {
+
+        function searchUsers() {
             const query = document.getElementById('searchInput').value;
-            if (query.length > 1) socket.emit('search_users', query);
+            if (query.length > 1) {
+                socket.emit('search_users', query);
+            }
         }
 
         function sendFriendRequest(username) {
@@ -240,7 +246,7 @@ function searchUsers() {
             }
         }
 
-        // Обработчики событий
+        // Обработчики событий от сервера
         socket.on('register_success', (data) => {
             currentUser = data.user;
             showApp();
@@ -255,13 +261,14 @@ function searchUsers() {
 
         socket.on('register_error', showError);
         socket.on('login_error', showError);
+        socket.on('friend_request_error', showError);
         
         socket.on('search_results', (results) => {
             const html = results.map(user => 
                 <div class="user-result">
-                    <img src="${user.avatar}" width="30" height="30" style="border-radius: 50%;">
+                    <span style="font-size: 20px; margin-right: 10px;">${user.avatar}</span>
                     ${user.username}
-                    <button onclick="sendFriendRequest('${user.username}')" style="margin-left: auto;">
+                    <button onclick="sendFriendRequest('${user.username}')" style="margin-left: auto; padding: 5px 10px;">
                         Добавить
                     </button>
                 </div>
@@ -271,16 +278,38 @@ function searchUsers() {
 
         socket.on('new_friend_request', (data) => {
             alert(Новая заявка от ${data.from});
+            // Обновляем список заявок
+            socket.emit('get_online_users');
         });
 
         socket.on('friend_added', (friend) => {
-            updateFriendsList([...getFriends(), friend]);
+            // Добавляем друга в список
+            const friendsList = document.getElementById('friendsList');
+            const friendHtml = 
+                <div class="friend-item" onclick="openPrivateChat(${JSON.stringify(friend).replace(/"/g, '&quot;')})">
+                    <span style="font-size: 20px; margin-right: 10px;">${friend.avatar}</span>
+                    ${friend.username}
+                    <span style="margin-left: auto; color: ${friend.online ? 'green' : 'gray'};">
+                        ●
+                    </span>
+                </div>
+            ;
+            friendsList.innerHTML += friendHtml;
         });
 
-        socket.on('new_private_message', addPrivateMessage);
-        socket.on('new_global_message', addGlobalMessage);
-        socket.on('chat_history', (data) => {
+        socket.on('new_private_message', (message) => {
+            addPrivateMessage(message);
+        });
+
+        socket.on('new_global_message', (message) => {
+            addGlobalMessage(message);
+        });
+socket.on('chat_history', (data) => {
             data.messages.forEach(addPrivateMessage);
+        });
+
+        socket.on('users_update', (users) => {
+            updateFriendsList(users.filter(u => currentUser.friends.includes(u.username)));
         });
 
         function showApp() {
@@ -291,12 +320,15 @@ function searchUsers() {
 
         function showError(error) {
             document.getElementById('authError').textContent = error;
+            setTimeout(() => {
+                document.getElementById('authError').textContent = '';
+            }, 3000);
         }
 
         function updateFriendsList(friends) {
             const html = friends.map(friend => 
-                <div class="friend-item" onclick="openPrivateChat(${JSON.stringify(friend)})">
-                    <img src="${friend.avatar}" width="30" height="30" style="border-radius: 50%;">
+                <div class="friend-item" onclick="openPrivateChat(${JSON.stringify(friend).replace(/"/g, '&quot;')})">
+                    <span style="font-size: 20px; margin-right: 10px;">${friend.avatar}</span>
                     ${friend.username}
                     <span style="margin-left: auto; color: ${friend.online ? 'green' : 'gray'};">
                         ●
@@ -305,11 +337,13 @@ function searchUsers() {
             ).join('');
             document.getElementById('friendsList').innerHTML = html || 'Друзей нет';
         }
-function updateRequestsList(requests) {
+
+        function updateRequestsList(requests) {
             const html = requests.map(req => 
                 <div class="request-item">
+                    <span style="font-size: 20px; margin-right: 10px;">${req.fromAvatar || '👤'}</span>
                     ${req.from}
-                    <button onclick="acceptFriendRequest('${req.from}')" style="margin-left: auto;">
+                    <button onclick="acceptFriendRequest('${req.from}')" style="margin-left: auto; padding: 5px 10px;">
                         Принять
                     </button>
                 </div>
@@ -317,17 +351,14 @@ function updateRequestsList(requests) {
             document.getElementById('requestsList').innerHTML = html || 'Заявок нет';
         }
 
-        function getFriends() {
-            return Array.from(document.querySelectorAll('.friend-item')).map(el => {
-                return { username: el.textContent.trim().replace('●', '') };
-            });
-        }
-
         function addPrivateMessage(message) {
             const isOwn = message.from === currentUser.username;
             const html = 
                 <div class="message ${isOwn ? 'own' : 'other'}">
-                    <strong>${isOwn ? 'Вы' : message.from}</strong><br>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 18px;">${message.fromAvatar || '👤'}</span>
+                        <strong>${isOwn ? 'Вы' : message.from}</strong>
+                    </div>
                     ${message.text}
                     <div style="font-size: 12px; opacity: 0.7;">${message.time}</div>
                 </div>
@@ -340,7 +371,10 @@ function updateRequestsList(requests) {
             const isOwn = message.from === currentUser.username;
             const html = 
                 <div class="message ${isOwn ? 'own' : 'other'}">
-                    <strong>${isOwn ? 'Вы' : message.from}</strong><br>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 18px;">${message.fromAvatar || '👤'}</span>
+                        <strong>${isOwn ? 'Вы' : message.from}</strong>
+                    </div>
                     ${message.text}
                     <div style="font-size: 12px; opacity: 0.7;">${message.time}</div>
                 </div>
@@ -356,10 +390,10 @@ function updateRequestsList(requests) {
 
         // Отправка по Enter
         document.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
+if (e.key === 'Enter') {
                 if (document.getElementById('globalTab').classList.contains('active')) {
                     sendGlobalMessage();
-                } else {
+                } else if (document.getElementById('privateMessageInput').value) {
                     sendPrivateMessage();
                 }
             }
