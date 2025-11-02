@@ -14,8 +14,7 @@ let users = [];
 let messages = [];
 let friendRequests = [];
 
-// Список смайликов для аватарок
-const avatars = ["😁", "🐈", "🥰", "😎", "😈", "😥", "😧", "🤴", "👽", "🤖", "🐶", "🦊", "🐵", "🦁", "🐸", "🐯"];
+const avatars = ["😁", "🐈", "🥰", "😎", "😈", "😥", "😧", "🤴"];
 
 app.get('/', (req, res) => {
     res.sendFile('index.html', { root: '.' });
@@ -24,31 +23,25 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    // Регистрация
     socket.on('register', (data) => {
         if (users.find(u => u.username === data.username)) {
             socket.emit('register_error', 'Имя занято');
             return;
         }
 
-        // Случайный смайлик для аватарки
-        const randomAvatar = avatars[Math.floor(Math.random() * avatars.length)];
-
         const user = {
             id: socket.id,
             username: data.username,
             password: data.password,
-            avatar: randomAvatar,
+            avatar: avatars[Math.floor(Math.random() * avatars.length)],
             friends: [],
             online: true
         };
 
         users.push(user);
         socket.emit('register_success', { user });
-        updateOnlineUsers();
     });
 
-    // Вход
     socket.on('login', (data) => {
         const user = users.find(u => u.username === data.username && u.password === data.password);
         if (!user) {
@@ -62,47 +55,40 @@ io.on('connection', (socket) => {
         const friends = users.filter(u => user.friends.includes(u.username));
         const requests = friendRequests.filter(req => req.to === user.username);
 
-        socket.emit('login_success', { user, friends, requests });
-        updateOnlineUsers();
+        socket.emit('login_success', { 
+            user: {
+                id: user.id,
+                username: user.username,
+                avatar: user.avatar,
+                friends: user.friends
+            }, 
+            friends: friends,
+            requests: requests 
+        });
     });
 
-    // Поиск пользователей
     socket.on('search_users', (query) => {
         const currentUser = users.find(u => u.id === socket.id);
         const results = users.filter(u => 
             u.username !== currentUser?.username &&
             !currentUser?.friends.includes(u.username) &&
-            u.username.includes(query)
+            u.username.toLowerCase().includes(query.toLowerCase())
         );
         socket.emit('search_results', results);
     });
 
-    // Заявка в друзья
     socket.on('send_friend_request', (targetUsername) => {
         const currentUser = users.find(u => u.id === socket.id);
-        const targetUser = users.find(u => u.username === targetUsername);
-
-        if (!currentUser || !targetUser) return;
-
+        
         friendRequests.push({
             from: currentUser.username,
-            to: targetUser.username
+            to: targetUsername,
+            fromAvatar: currentUser.avatar
         });
 
         socket.emit('friend_request_sent');
-        
-        const targetSocket = Object.values(io.sockets.sockets).find(s => 
-            users.find(u => u.username === targetUsername)?.id === s.id
-        );
-        if (targetSocket) {
-            targetSocket.emit('new_friend_request', {
-                from: currentUser.username,
-                fromAvatar: currentUser.avatar
-            });
-        }
     });
 
-    // Принять заявку
     socket.on('accept_friend_request', (fromUsername) => {
         const currentUser = users.find(u => u.id === socket.id);
         const fromUser = users.find(u => u.username === fromUsername);
@@ -116,17 +102,14 @@ io.on('connection', (socket) => {
             );
 
             socket.emit('friend_added', fromUser);
-            updateOnlineUsers();
         }
     });
 
-    // Личные сообщения
     socket.on('private_message', (data) => {
         const currentUser = users.find(u => u.id === socket.id);
         const targetUser = users.find(u => u.username === data.to);
 
-        if (!currentUser || !targetUser) return;
-const message = {
+        const message = {
             from: currentUser.username,
             fromAvatar: currentUser.avatar,
             to: data.to,
@@ -135,22 +118,11 @@ const message = {
         };
 
         messages.push(message);
-
         socket.emit('new_private_message', message);
-        
-        const targetSocket = Object.values(io.sockets.sockets).find(s => 
-            users.find(u => u.username === data.to)?.id === s.id
-        );
-        if (targetSocket) {
-            targetSocket.emit('new_private_message', message);
-        }
     });
 
-    // Общий чат
     socket.on('global_message', (text) => {
         const currentUser = users.find(u => u.id === socket.id);
-        if (!currentUser) return;
-
         const message = {
             from: currentUser.username,
             fromAvatar: currentUser.avatar,
@@ -160,9 +132,7 @@ const message = {
 
         io.emit('new_global_message', message);
     });
-
-    // Загрузка истории чата
-    socket.on('load_chat_history', (friendUsername) => {
+socket.on('load_chat_history', (friendUsername) => {
         const currentUser = users.find(u => u.id === socket.id);
         const chatMessages = messages.filter(m => 
             (m.from === currentUser.username && m.to === friendUsername) ||
@@ -174,14 +144,9 @@ const message = {
     socket.on('disconnect', () => {
         const user = users.find(u => u.id === socket.id);
         if (user) user.online = false;
-        updateOnlineUsers();
     });
-
-    function updateOnlineUsers() {
-        io.emit('users_update', users);
-    }
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log('Server running on port ' + PORT);
 });
